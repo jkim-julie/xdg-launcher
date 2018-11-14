@@ -35,6 +35,7 @@
 #include "runxdg.hpp"
 
 #define RUNXDG_CONFIG "runxdg.toml"
+#define AREA_NORMAL_FULL "normal.full"
 
 void fatal(const char* format, ...)
 {
@@ -298,10 +299,7 @@ int RunXDG::init_wm (void)
   std::function< void(json_object*) > h_syncdraw =
       [this](json_object* object) {
     AGL_DEBUG("Got Event_SyncDraw");
-    json_object* obj = json_object_new_object();
-    json_object_object_add(obj, this->m_wm->kKeyDrawingName,
-                           json_object_new_string(this->m_role.c_str()));
-    this->m_wm->endDraw(obj);
+    this->m_wm->endDraw(this->m_role.c_str());
   };
 
   std::function< void(json_object*) > h_flushdraw= [](json_object* object) {
@@ -327,26 +325,8 @@ int RunXDG::init_hs (void)
   }
 
   std::function< void(json_object*) > handler = [this] (json_object* object) {
-    json_object *val;
-
-    if (json_object_object_get_ex(object, "application_name", &val)) {
-      const char *name = json_object_get_string(val);
-
-      AGL_DEBUG("Event_TapShortcut <%s>", name);
-
-      if (strcmp(name, this->m_role.c_str()) == 0) {
-        // check app exist and re-launch if needed
-        AGL_DEBUG("Activesurface %s ", this->m_role.c_str());
-
-        json_object *obj = json_object_new_object();
-        json_object_object_add(obj, this->m_wm->kKeyDrawingName,
-                               json_object_new_string(this->m_role.c_str()));
-        json_object_object_add(obj, this->m_wm->kKeyDrawingArea,
-                               json_object_new_string("normal.full"));
-
-        this->m_wm->activateSurface(obj);
-      }
-    }
+    AGL_DEBUG("Activesurface %s ", this->m_role.c_str());
+    this->m_wm->activateWindow(this->m_role.c_str(), AREA_NORMAL_FULL);
   };
   m_hs->set_event_handler(LibHomeScreen::Event_TapShortcut, handler);
 
@@ -476,26 +456,14 @@ void RunXDG::setup_surface (int id)
   std::string sid = std::to_string(id);
 
   // This surface is mine, register pair app_name and ivi id.
-  json_object *obj = json_object_new_object();
-  json_object_object_add(obj, m_wm->kKeyDrawingName,
-                         json_object_new_string(m_role.c_str()));
-  json_object_object_add(obj, m_wm->kKeyIviId,
-                         json_object_new_string(sid.c_str()));
-
-  AGL_DEBUG("requestSurfaceXDG(%s,%s)", m_role.c_str(), sid.c_str());
-  m_wm->requestSurfaceXDG(obj);
+  AGL_DEBUG("requestSurfaceXDG(%s,%d)", m_role.c_str(), id);
+  m_wm->requestSurfaceXDG(this->m_role.c_str(), id);
 
   if (m_pending_create) {
     // Recovering 1st time tap_shortcut is dropped because
     // the application has not been run yet (1st time launch)
     m_pending_create = false;
-
-    json_object *obj = json_object_new_object();
-    json_object_object_add(obj, m_wm->kKeyDrawingName,
-                           json_object_new_string(m_role.c_str()));
-    json_object_object_add(obj, m_wm->kKeyDrawingArea,
-                           json_object_new_string("normal.full"));
-    m_wm->activateSurface(obj);
+    m_wm->activateWindow(this->m_role.c_str(), AREA_NORMAL_FULL);
   }
 }
 

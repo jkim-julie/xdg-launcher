@@ -1,5 +1,5 @@
 [gerrit]
 host=gerrit.automotivelinux.org
 port=29418
-project=staging/soundmanager
+project=staging/xdg-launcher
 defaultbranch=master
