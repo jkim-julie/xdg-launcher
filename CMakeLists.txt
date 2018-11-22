@@ -9,7 +9,6 @@ set(PROJECT_VERSION "${PROJECT_MAJOR_VERSION}.${PROJECT_MINOR_VERSION}")
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLIB REQUIRED glib-2.0)
 pkg_check_modules(GIO REQUIRED gio-2.0)
-pkg_check_modules(ILMCONTROL REQUIRED ilmControl)
 
 # No configuration
 # configure_file (
@@ -21,7 +20,6 @@ pkg_check_modules(ILMCONTROL REQUIRED ilmControl)
 
 include_directories(
   "include"
-  "${ILMCONTROL_INCLUDE_DIRS}"
   "${GLIB_INCLUDE_DIRS}"
   "${GIO_INCLUDE_DIRS}"
   )
@@ -39,6 +37,7 @@ SET(LIBRARIES
   pthread
   ${GLIB_LIBRARIES}
   ${GIO_LIBRARIES}
+  appbridge
   )
 
 add_executable (runxdg ${SRC_FILES})

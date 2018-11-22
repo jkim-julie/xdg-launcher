@@ -29,10 +29,7 @@
 
 #include <gio/gio.h>
 
-#include <ilm/ilm_control.h>
-
-#include <libwindowmanager.h>
-#include <libhomescreen.hpp>
+#include <libappbridge.h>
 
 #define AGL_FATAL(fmt, ...) fatal("ERROR: " fmt "\n", ##__VA_ARGS__)
 #define AGL_WARN(fmt, ...) warn("WARNING: " fmt "\n", ##__VA_ARGS__)
@@ -42,21 +39,6 @@
 void fatal (const char* format, ...);
 void warn (const char* format, ...);
 void debug (const char* format, ...);
-
-class ILMControl
-{
-  public:
-    ILMControl(notificationFunc callback, void *user_data) {
-        ilm_init();
-        ilm_registerNotification(callback, user_data);
-    }
-
-    ~ILMControl(void) {
-        ilm_unregisterNotification();
-        ilm_destroy();
-        AGL_DEBUG("ilm_destory().\n");
-    }
-};
 
 class Launcher
 {
@@ -122,18 +104,26 @@ class AFMWebSocketLauncher : public AFMLauncher
       while (!(e_flag)) { sleep(60*60*24); } }
 };
 
-class RunXDG
+class RunXDG : public AppBridgeDelegate
 {
   public:
     RunXDG(int port, const char* token, const char* id);
 
     void start(void);
-    void notify_ivi_control_cb(ilmObjectType object, t_ilm_uint id,
-                               t_ilm_bool created);
-    static void notify_ivi_control_cb_static (ilmObjectType object,
-                                              t_ilm_uint id,
-                                              t_ilm_bool created,
-                                              void *user_data);
+
+    // AppBridgeDelegate:
+    void OnActive() override;
+    void OnInactive() override;
+    void OnVisible() override;
+    void OnInvisible() override;
+    void OnSyncDraw() override;
+    void OnFlushDraw() override;
+    void OnTabShortcut() override;
+    void OnScreenMessage(const char* message) override;
+    void OnSurfaceCreated(int id, pid_t pid) override;
+    void OnSurfaceDestroyed(int id, pid_t pid) override;
+    void OnRequestedSurfaceID(int id, pid_t* surface_pid_output) override;
+
   private:
     std::string m_role;
     std::string m_path;
@@ -144,21 +134,11 @@ class RunXDG
     std::string m_token;
 
     Launcher *m_launcher;
-
-    LibWindowmanager *m_wm;
-    LibHomeScreen *m_hs;
-    ILMControl *m_ic;
+    std::unique_ptr<AppBridge> m_app_bridge;
 
     std::map<int, int> m_surfaces;  // pair of <afm:rid, ivi:id>
 
-    bool m_pending_create = false;
-
-    int init_wm(void);
-    int init_hs(void);
-
     int parse_config(const char *file);
-
-    void setup_surface(int id);
 };
 
 #endif  // RUNXDG_HPP

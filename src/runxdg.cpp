@@ -35,7 +35,6 @@
 #include "runxdg.hpp"
 
 #define RUNXDG_CONFIG "runxdg.toml"
-#define AREA_NORMAL_FULL "normal.full"
 
 void fatal(const char* format, ...)
 {
@@ -61,45 +60,6 @@ void debug(const char* format, ...)
   va_start(va_args, format);
   vfprintf(stderr, format, va_args);
   va_end(va_args);
-}
-
-void RunXDG::notify_ivi_control_cb (ilmObjectType object, t_ilm_uint id,
-                                    t_ilm_bool created)
-{
-  if (object == ILM_SURFACE) {
-    struct ilmSurfaceProperties surf_props;
-
-    ilm_getPropertiesOfSurface(id, &surf_props);
-    pid_t surf_pid = surf_props.creatorPid;
-
-    if (!created) {
-      AGL_DEBUG("ivi surface (id=%d, pid=%d) destroyed.", id, surf_pid);
-      m_launcher->unregister_surfpid(surf_pid);
-      m_surfaces.erase(surf_pid);
-      return;
-    }
-
-    AGL_DEBUG("ivi surface (id=%d, pid=%d) is created.", id, surf_pid);
-
-    m_launcher->register_surfpid(surf_pid);
-    if (m_launcher->m_rid &&
-        surf_pid == m_launcher->find_surfpid_by_rid(m_launcher->m_rid)) {
-      setup_surface(id);
-    }
-    m_surfaces[surf_pid] = id;
-  } else if (object == ILM_LAYER) {
-    if (created)
-      AGL_DEBUG("ivi layer: %d created.", id);
-    else
-      AGL_DEBUG("ivi layer: %d destroyed.", id);
-  }
-}
-
-void RunXDG::notify_ivi_control_cb_static (ilmObjectType object, t_ilm_uint id,
-                                           t_ilm_bool created, void *user_data)
-{
-  RunXDG *runxdg = static_cast<RunXDG*>(user_data);
-  runxdg->notify_ivi_control_cb(object, id, created);
 }
 
 int POSIXLauncher::launch (std::string& name)
@@ -272,73 +232,6 @@ static void init_signal (void)
   }
 }
 
-int RunXDG::init_wm (void)
-{
-  m_wm = new LibWindowmanager();
-  if (m_wm->init(m_port, m_token.c_str())) {
-    AGL_DEBUG("cannot initialize windowmanager");
-    return -1;
-  }
-
-  std::function< void(json_object*) > h_active = [](json_object* object) {
-    AGL_DEBUG("Got Event_Active");
-  };
-
-  std::function< void(json_object*) > h_inactive = [](json_object* object) {
-    AGL_DEBUG("Got Event_Inactive");
-  };
-
-  std::function< void(json_object*) > h_visible = [](json_object* object) {
-    AGL_DEBUG("Got Event_Visible");
-  };
-
-  std::function< void(json_object*) > h_invisible = [](json_object* object) {
-    AGL_DEBUG("Got Event_Invisible");
-  };
-
-  std::function< void(json_object*) > h_syncdraw =
-      [this](json_object* object) {
-    AGL_DEBUG("Got Event_SyncDraw");
-    this->m_wm->endDraw(this->m_role.c_str());
-  };
-
-  std::function< void(json_object*) > h_flushdraw= [](json_object* object) {
-    AGL_DEBUG("Got Event_FlushDraw");
-  };
-
-  m_wm->set_event_handler(LibWindowmanager::Event_Active, h_active);
-  m_wm->set_event_handler(LibWindowmanager::Event_Inactive, h_inactive);
-  m_wm->set_event_handler(LibWindowmanager::Event_Visible, h_visible);
-  m_wm->set_event_handler(LibWindowmanager::Event_Invisible, h_invisible);
-  m_wm->set_event_handler(LibWindowmanager::Event_SyncDraw, h_syncdraw);
-  m_wm->set_event_handler(LibWindowmanager::Event_FlushDraw, h_flushdraw);
-
-  return 0;
-}
-
-int RunXDG::init_hs (void)
-{
-  m_hs = new LibHomeScreen();
-  if (m_hs->init(m_port, m_token.c_str())) {
-    AGL_DEBUG("cannot initialize homescreen");
-    return -1;
-  }
-
-  std::function< void(json_object*) > handler = [this] (json_object* object) {
-    AGL_DEBUG("Activesurface %s ", this->m_role.c_str());
-    this->m_wm->activateWindow(this->m_role.c_str(), AREA_NORMAL_FULL);
-  };
-  m_hs->set_event_handler(LibHomeScreen::Event_TapShortcut, handler);
-
-  std::function< void(json_object*) > h_default= [](json_object* object) {
-    const char *j_str = json_object_to_json_string(object);
-    AGL_DEBUG("Got event [%s]", j_str);
-  };
-  m_hs->set_event_handler(LibHomeScreen::Event_OnScreenMessage, h_default);
-
-  return 0;
-}
-
 int RunXDG::parse_config (const char *path_to_config)
 {
   auto config = cpptoml::parse_file(path_to_config);
@@ -438,33 +331,9 @@ RunXDG::RunXDG (int port, const char* token, const char* id)
             m_id.c_str(), m_role.c_str(), m_path.c_str(),
             m_port, m_token.c_str());
 
-  // Setup HomeScreen/WindowManager API
-  if (init_wm())
-    AGL_FATAL("cannot setup wm API");
-
-  if (init_hs())
-    AGL_FATAL("cannot setup hs API");
-
-  // Setup ilmController API
-  m_ic = new ILMControl(notify_ivi_control_cb_static, this);
+  m_app_bridge = std::make_unique<AppBridge>(m_port, m_token, m_id, m_role, this);
 
   AGL_DEBUG("RunXDG created.");
-}
-
-void RunXDG::setup_surface (int id)
-{
-  std::string sid = std::to_string(id);
-
-  // This surface is mine, register pair app_name and ivi id.
-  AGL_DEBUG("requestSurfaceXDG(%s,%d)", m_role.c_str(), id);
-  m_wm->requestSurfaceXDG(this->m_role.c_str(), id);
-
-  if (m_pending_create) {
-    // Recovering 1st time tap_shortcut is dropped because
-    // the application has not been run yet (1st time launch)
-    m_pending_create = false;
-    m_wm->activateWindow(this->m_role.c_str(), AREA_NORMAL_FULL);
-  }
 }
 
 void POSIXLauncher::register_surfpid (pid_t surf_pid)
@@ -554,8 +423,6 @@ void RunXDG::start (void)
 
   // take care 1st time launch
   AGL_DEBUG("waiting for notification: surafce created");
-  m_pending_create = true;
-
   // in case, target app has already run
   if (m_launcher->m_rid) {
     pid_t surf_pid = m_launcher->find_surfpid_by_rid(m_launcher->m_rid);
@@ -567,11 +434,57 @@ void RunXDG::start (void)
         int id = itr->second;
         AGL_DEBUG("surface %d for <%s> already exists", id,
                   m_role.c_str());
-        setup_surface(id);
+        m_app_bridge->SetupSurface(id);
       }
     }
   }
   m_launcher->loop(e_flag);
+}
+
+void RunXDG::OnActive() {
+  fprintf(stderr, "RunXDG::OnActive\r\n");
+}
+
+void RunXDG::OnInactive() {
+  fprintf(stderr, "RunXDG::OnInactive\r\n");
+}
+
+void RunXDG::OnVisible() {
+  fprintf(stderr, "RunXDG::OnVisible\r\n");
+}
+
+void RunXDG::OnInvisible() {
+  fprintf(stderr, "RunXDG::OnInvisible\r\n");
+}
+
+void RunXDG::OnSyncDraw() {
+  fprintf(stderr, "RunXDG::OnSyncDraw\r\n");
+}
+
+void RunXDG::OnFlushDraw() {
+  fprintf(stderr, "RunXDG::OnFlushDraw\r\n");
+}
+
+void RunXDG::OnTabShortcut() {
+  fprintf(stderr, "RunXDG::OnTabShortcut\r\n");
+}
+
+void RunXDG::OnScreenMessage(const char* message) {
+  fprintf(stderr, "RunXDG::OnScreenMessage:%s\r\n", message);
+}
+
+void RunXDG::OnSurfaceCreated(int id, pid_t pid) {
+  fprintf(stderr, "RunXDG::OnSurfaceCreated\r\n");
+  m_launcher->register_surfpid(pid);
+}
+
+void RunXDG::OnSurfaceDestroyed(int id, pid_t pid) {
+  fprintf(stderr, "RunXDG::OnSurfaceDestroyed\r\n");
+  m_launcher->unregister_surfpid(pid);
+}
+
+void RunXDG::OnRequestedSurfaceID(int id, pid_t* surface_pid_output) {
+  *surface_pid_output = m_launcher->find_surfpid_by_rid(id);
 }
 
 int main (int argc, const char* argv[])
